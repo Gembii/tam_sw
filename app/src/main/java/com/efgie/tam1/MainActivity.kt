@@ -1,5 +1,6 @@
 package com.efgie.tam1
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,6 +26,7 @@ import com.efgie.tam1.ui.theme.TAM1Theme
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -40,7 +42,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
-import com.efgie.tam1.repository.model.Planet
+import com.efgie.tam1.repository.model.PlanetResponse
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -49,41 +58,47 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         viewModel.getData()
         setContent {
-            MainContent(viewModel)
+            MainContent(viewModel = viewModel, onClick = { id -> navigateToDetailsActivity(id)})
         }
+    }
+
+    private fun navigateToDetailsActivity(id: String) {
+        val detailsIntent = Intent(this, DetailsActivity::class.java)
+        detailsIntent.putExtra("CUSTOM_ID", id)
+        startActivity(detailsIntent)
     }
 }
 
 @Composable
-fun MainContent(viewModel: MainViewModel) {
+fun MainContent(viewModel: MainViewModel, onClick: (String) -> Unit) {
     TAM1Theme {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
             val uiState by viewModel.immutablePlanetsData.observeAsState(UIState(isLoading = true))
-            Showcase(uiState = uiState, modifier = Modifier.fillMaxSize())
+            Showcase(uiState = uiState, modifier = Modifier.fillMaxSize(), onClick = { id -> onClick.invoke(id)})
         }
     }
 }
 
 @Composable
-fun Showcase(uiState: UIState<List<Planet>>, modifier: Modifier = Modifier) {
+fun Showcase(uiState: UIState<List<PlanetResponse>>, modifier: Modifier = Modifier, onClick: (String) -> Unit) {
     when {
         uiState.isLoading -> ShowLoadingIndicator()
         uiState.error != null -> ShowErrorMessage(uiState.error.toString())
-        else -> uiState.data?.let { ShowPlanetsData(it, modifier) }
+        else -> uiState.data?.let { ShowPlanetsData(it, modifier, onClick = { id -> onClick.invoke(id)}) }
     }
 }
 
 @Composable
-fun ShowPlanetsData(planets: List<Planet>?, modifier: Modifier) {
+fun ShowPlanetsData(planets: List<PlanetResponse>?, modifier: Modifier, onClick: (String) -> Unit) {
     if (planets?.isNotEmpty() == true) {
         LazyColumn(
             modifier = modifier.fillMaxSize(),
         ) {
             items(planets) { planet ->
-                PlanetCard(planet = planet)
+                PlanetCard(planet = planet, onClick = { id -> onClick.invoke(id)})
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
@@ -100,15 +115,18 @@ fun ShowPlanetsData(planets: List<Planet>?, modifier: Modifier) {
 }
 
 @Composable
-fun PlanetCard(planet: Planet) {
+fun PlanetCard(planet: PlanetResponse, onClick: (String) -> Unit) {
     Log.d("PlanetCard", "${planet.name} | ${planet.diameter} | ${planet.population} | ${planet.climate} | ${planet.terrain}")
 
-    val imageResource = getImageResource(planet)
+    val imageResource = getImageResource(planet.climate)
+
+    val planetId = getPlanetIdFromUrl(planet.url)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(8.dp),
+            .padding(8.dp)
+            .clickable { onClick.invoke(planetId) },
         shape = RoundedCornerShape(8.dp)
     ) {
         Box(
@@ -127,25 +145,35 @@ fun PlanetDetail(detailName: String, detailValue: String) {
     Row(
         verticalAlignment = Alignment.Top
     ) {
+        PlanetDetailHeader(detailName)
+        PlanetDetailValue(detailValue)
+    }
+}
+
+@Composable
+fun PlanetDetailHeader(detailName: String) {
         Text(
             text = "$detailName: ",
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp,
             color = Color.White
         )
-        Text(
-            text = detailValue,
-            fontSize = 16.sp,
-            color = Color.White
-        )
-    }
+}
+
+@Composable
+fun PlanetDetailValue(detailValue: String) {
+    Text(
+        text = detailValue,
+        fontSize = 16.sp,
+        color = Color.White
+    )
 }
 
 @Composable
 fun PlanetCardBackground(imageResource: Int) {
     Image(
         painter = painterResource(id = imageResource),
-        contentDescription = null,
+        contentDescription = "Climate Image",
         modifier = Modifier
             .fillMaxSize()
             .height(200.dp),
@@ -154,7 +182,7 @@ fun PlanetCardBackground(imageResource: Int) {
 }
 
 @Composable
-fun PlanetCardContent(planet: Planet) {
+fun PlanetCardContent(planet: PlanetResponse) {
     Column(
         modifier = Modifier
             .padding(16.dp)
@@ -179,30 +207,48 @@ fun PlanetCardContent(planet: Planet) {
     }
 }
 
-fun getImageResource(planet: Planet): Int {
+fun getImageResource(climate: String): Int {
     return when {
-        planet.climate.contains("tropical") -> R.drawable.tropical
-        planet.climate.contains("arid") -> R.drawable.arid
-        planet.climate.contains("temperate") -> R.drawable.temperate
-        planet.climate.contains("frozen") -> R.drawable.frozen
-        planet.climate.contains("murky") -> R.drawable.murky
+        climate.contains("tropical") -> R.drawable.tropical
+        climate.contains("arid") -> R.drawable.arid
+        climate.contains("temperate") -> R.drawable.temperate
+        climate.contains("frozen") -> R.drawable.frozen
+        climate.contains("murky") -> R.drawable.murky
         else -> R.drawable.def
     }
 }
 
+fun getPlanetIdFromUrl(url: String): String {
+    val parts = url.trimEnd('/').split('/')
+    return parts[parts.size - 1]
+}
+
 @Composable
 fun ShowLoadingIndicator() {
-    Box(
+    StarWarsLoadingIndicator()
+}
+
+@Composable
+fun StarWarsLoadingIndicator() {
+    val infiniteTransition = rememberInfiniteTransition("SW Loading Animation")
+    val angle = infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "SW Animation"
+    )
+
+    Image(
+        painter = painterResource(id = R.drawable.helmet),
+        contentDescription = "Spinning Stormtrooper Helmet",
         modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(64.dp),
-            color = MaterialTheme.colorScheme.onPrimary
-        )
-    }
+            .graphicsLayer {
+                rotationZ = angle.value
+            }
+    )
 }
 
 @Composable
